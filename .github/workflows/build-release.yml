@@ -1,10 +1,10 @@
-name: Build and release nabu kernel
+name: 构建并发布 nabu 内核
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag; leave empty to generate a UTC tag"
+        description: "Release 标签；留空则用 UTC 时间生成"
         required: false
         type: string
 
@@ -27,12 +27,12 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout kernel
+      - name: 检出内核源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 1
 
-      - name: Free runner disk space
+      - name: 释放构建空间
         shell: bash
         run: |
           set -euxo pipefail
@@ -44,7 +44,7 @@ jobs:
           docker system prune --all --force || true
           df -h /
 
-      - name: Install build dependencies
+      - name: 安装构建依赖
         shell: bash
         run: |
           set -euxo pipefail
@@ -53,7 +53,7 @@ jobs:
             bc bison build-essential ca-certificates ccache cpio curl flex git \
             libelf-dev libssl-dev python3 rsync unzip zip zlib1g-dev
 
-      - name: Fetch pinned toolchains
+      - name: 获取固定工具链
         shell: bash
         run: |
           set -euxo pipefail
@@ -104,7 +104,7 @@ jobs:
             echo "PAHOLE=$pahole"
           } >> "$GITHUB_ENV"
 
-      - name: Build and validate package
+      - name: 编译内核与模块并校验安装包
         shell: bash
         env:
           KERNEL_DIR: ${{ github.workspace }}
@@ -116,7 +116,7 @@ jobs:
           ./bk_build/build.sh
           df -h /
 
-      - name: Locate package
+      - name: 定位并校验产物
         id: package
         shell: bash
         env:
@@ -124,33 +124,63 @@ jobs:
         run: |
           set -euo pipefail
           package=$(find "$OUT_DIR/packages" -maxdepth 1 -type f \
-            -name 'bk-Kernel_nabu-A17-Hyper-b2w3-*.zip' -print -quit)
+            -name 'bk-Kernel_nabu-A17-Hyper-Pan-*.zip' -print -quit)
+          module=$(find "$OUT_DIR/packages" -maxdepth 1 -type f \
+            -name 'bkk-control-*.zip' -print -quit)
           test -n "$package"
+          test -n "$module"
           test -f "$package.sha256"
+          test -f "$module.sha256"
           unzip -t "$package" >/dev/null
+          unzip -t "$module" >/dev/null
+          if unzip -Z1 "$package" | grep '^module/' >/dev/null; then
+            echo "Kernel package contains bkk-control" >&2
+            exit 1
+          fi
+          if unzip -Z1 "$module" | grep '^Image.gz$' >/dev/null; then
+            echo "Module package contains a kernel image" >&2
+            exit 1
+          fi
+          unzip -p "$module" module.prop | grep -Fx 'id=bk-control'
           package_dir=$(dirname "$package")
           package_name=$(basename "$package")
           (cd "$package_dir" && sha256sum --check "${package_name}.sha256")
+          module_name=$(basename "$module")
+          (cd "$package_dir" && sha256sum --check "${module_name}.sha256")
           echo "package=$package" >> "$GITHUB_OUTPUT"
           echo "checksum=$package.sha256" >> "$GITHUB_OUTPUT"
+          echo "module=$module" >> "$GITHUB_OUTPUT"
+          echo "module_checksum=$module.sha256" >> "$GITHUB_OUTPUT"
 
-      - name: Upload workflow artifact
+      - name: 上传内核产物
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: bk-Kernel_nabu-A17-Hyper-b2w3
+          name: bk-Kernel_nabu-A17-Hyper-Pan
           path: |
             ${{ steps.package.outputs.package }}
             ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release
+      - name: 上传 bkk-control 模块
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bkk-control
+          path: |
+            ${{ steps.package.outputs.module }}
+            ${{ steps.package.outputs.module_checksum }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布 GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_TAG: ${{ inputs.release_tag }}
           PACKAGE: ${{ steps.package.outputs.package }}
           CHECKSUM: ${{ steps.package.outputs.checksum }}
+          MODULE: ${{ steps.package.outputs.module }}
+          MODULE_CHECKSUM: ${{ steps.package.outputs.module_checksum }}
         run: |
           set -euo pipefail
           package_name=$(basename "$PACKAGE" .zip)
@@ -164,12 +194,13 @@ jobs:
           fi
           notes="${RUNNER_TEMP}/release-notes.md"
           {
-            echo "Kernel: 4.14.336_bk-Kernel_17.0-b2w3"
+            echo "Kernel: 4.14.336_bk-Kernel_17.0-Pan"
             echo "Target: Xiaomi Pad 5 (nabu)"
             echo "Build: GitHub Actions run ${GITHUB_RUN_NUMBER}"
             echo "Commit: ${GITHUB_SHA}"
           } > "$notes"
           gh release create "$tag" "$PACKAGE" "$CHECKSUM" \
+            "$MODULE" "$MODULE_CHECKSUM" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$package_name" \

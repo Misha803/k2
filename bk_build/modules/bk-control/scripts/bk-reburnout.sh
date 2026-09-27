@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# bk-Kernel runtime policy for nabu. Kernel thermal limits remain authoritative.
+# bkk-control runtime policy for nabu. Kernel thermal limits remain authoritative.
 
 PATH=/system/bin:/system/xbin:/vendor/bin
 export PATH
@@ -964,7 +964,7 @@ REB_TOUCH_HIGH_COUNT=0
 trap 'reb_cleanup' EXIT HUP INT TERM
 
 case "$(uname -r)" in
-	4.14.336_bk-Kernel_17.0-b2w3) ;;
+	4.14.336_bk-Kernel_17.0-Pan) ;;
 	*) reb_log "ignored on incompatible kernel $(uname -r)"; exit 0 ;;
 esac
 

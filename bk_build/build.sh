@@ -9,11 +9,11 @@ else
 fi
 ARCH=${ARCH:-arm64}
 DEFCONFIG=${DEFCONFIG:-nabu_defconfig}
-OUT_DIR=${OUT_DIR:-/home/rinnrei/Project/uwuAP-temp/out/nabu-4.14.336-b2w3}
-JOBS=${JOBS:-4}
-CLANG_DIR=${CLANG_DIR:-/home/rinnrei/Project/uwuAP-temp/toolchains/aosp-clang-r547379}
-GCC64_DIR=${GCC64_DIR:-/home/rinnrei/Project/uwuAOSP/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9}
-GCC32_DIR=${GCC32_DIR:-/home/rinnrei/Project/uwuAOSP/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9}
+OUT_DIR=${OUT_DIR:-/home/rinnrei/Project/uwuAP-temp/out/nabu-4.14.336-Pan}
+JOBS=${JOBS:-${JOB:-4}}
+CLANG_DIR=${CLANG_DIR:-/home/rinnrei/Project/uwuAOSP/prebuilts/clang/host/linux-x86/clang-r547379}
+GCC64_DIR=${GCC64_DIR:-/home/rinnrei/Project/uwuAP-temp/toolchains/nabu/gcc64}
+GCC32_DIR=${GCC32_DIR:-/home/rinnrei/Project/uwuAP-temp/toolchains/nabu/gcc32}
 PAHOLE=${PAHOLE:-/home/rinnrei/Project/uwuAOSP/prebuilts/kernel-build-tools/linux-x86/bin/pahole}
 PAHOLE_FLAGS=${PAHOLE_FLAGS:-"--skip_encoding_btf_decl_tag --skip_encoding_btf_type_tag --skip_encoding_btf_enum64"}
 DISABLE_LTO_CACHE=${DISABLE_LTO_CACHE:-1}
@@ -74,19 +74,19 @@ stage()
   printf '\n[%s] %s\n' "$1" "$2"
 }
 
-stage "Config" "内核目录：$KERNEL_DIR"
+stage "配置" "内核目录：$KERNEL_DIR"
 printf '输出目录：%s\n配置文件：%s\n并行任务：%s\n' \
   "$OUT_DIR" "$DEFCONFIG" "$JOBS"
 printf 'ThinLTO 磁盘缓存：%s\n' "$([ "$DISABLE_LTO_CACHE" = 1 ] && echo 关闭 || echo 开启)"
 printf 'ccache：%s\n' "$([ -n "$CCACHE" ] && echo 开启 || echo 关闭)"
 
 # Merge the feature fragment after nabu_defconfig, then resolve dependencies.
-stage "Config" "生成内核配置"
+stage "配置" "生成内核配置"
 make_kernel "$DEFCONFIG"
 KCONFIG_CONFIG="$OUT_DIR/.config" "$KERNEL_DIR/scripts/kconfig/merge_config.sh" -m \
   "$OUT_DIR/.config" "$FRAGMENT"
 make_kernel olddefconfig
-stage "Check" "核对必要选项"
+stage "校验" "核对必要选项"
 for symbol in MACH_XIAOMI_NABU BPF BPF_SYSCALL BPF_JIT BPF_JIT_ALWAYS_ON \
   BPF_EVENTS CGROUPS MEMCG CGROUP_SCHED CGROUP_FREEZER CGROUP_CPUACCT \
   CGROUP_BPF CGROUP_DEVICE CGROUP_PIDS CGROUP_NET_PRIO CPUSETS PSI \
@@ -144,7 +144,7 @@ grep -qx 'CONFIG_CMDLINE=""' "$OUT_DIR/.config" || {
 cp "$OUT_DIR/.config" "$OUT_DIR/nabu-a17.config"
 
 # Build generated-header owners before the parallel object batch.
-stage "Build" "编译内核对象"
+stage "编译" "编译内核对象"
 make_kernel init/version.o
 make_kernel -j"$JOBS" security/selinux/
 make_kernel -j"$JOBS" \
@@ -154,7 +154,7 @@ make_kernel -j"$JOBS" \
   net/core/filter.o kernel/bpf/cgroup.o net/ipv4/udp.o net/ipv6/udp.o \
   drivers/devfreq/bimc-bwmon.o \
   drivers/extcon/extcon.o \
-  drivers/kernelsu/ksu.o \
+  drivers/kernelsu/ \
   arch/arm64/kernel/setup.o arch/arm64/kernel/cpu_errata.o \
   arch/arm64/net/bpf_jit_comp.o fs/pstore/ram.o fs/pstore/platform.o \
   kernel/printk/printk.o kernel/sys.o mm/oom_kill.o \
@@ -186,12 +186,12 @@ make_kernel -j"$JOBS" \
   kernel/trace/trace_output.o
 
 # Re-enter make after compiling overlays so DTBO_OBJS is evaluated again.
-stage "Build" "编译Image.gz+设备树"
+stage "编译" "编译Image.gz+设备树"
 make_kernel -j"$JOBS" Image.gz dtbs
-stage "Build" "生成dtbo.img"
+stage "编译" "生成dtbo.img"
 make_kernel -j"$JOBS" dtbo.img
 
-stage "Check" "校验Image / BTF / DTB / DTBO"
+stage "校验" "校验Image / BTF / DTB / DTBO"
 BOOT="$OUT_DIR/arch/$ARCH/boot"
 DTB_ROOT="$BOOT/dts/qcom"
 mkdir -p "$OUT_DIR/artifacts"
@@ -243,35 +243,9 @@ grep -Eq '(^|[[:space:]])pid[[:space:]]*;' \
   echo "BTF task_struct::pid is missing" >&2; exit 1;
 }
 kernel_release=$(make_kernel -s kernelrelease)
-[ "$kernel_release" = "4.14.336_bk-Kernel_17.0-b2w3" ] || {
+[ "$kernel_release" = "4.14.336_bk-Kernel_17.0-Pan" ] || {
   echo "unexpected kernel release: $kernel_release" >&2; exit 1;
 }
-
-stage "Generate" "生成bk-ZRAM_Tool"
-"$CLANG_DIR/bin/clang" --target=aarch64-linux-android \
-  -Oz -ffreestanding -fno-builtin -fno-stack-protector \
-  -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-pie \
-  -nostdlib -static -fuse-ld=lld -Wl,-e,_start -Wl,--build-id=none \
-  -Wl,-z,max-page-size=4096 \
-  "$SCRIPT_DIR/tools/bk-zram-setup.c" \
-  -o "$OUT_DIR/artifacts/bk-zram-setup"
-"$CLANG_DIR/bin/llvm-objdump" -f "$OUT_DIR/artifacts/bk-zram-setup" | \
-  grep -F 'architecture: aarch64' >/dev/null || {
-    echo "invalid zram helper architecture" >&2; exit 1;
-  }
-chmod 0755 "$OUT_DIR/artifacts/bk-zram-setup"
-"$CLANG_DIR/bin/clang" --target=aarch64-linux-android \
-  -Oz -ffreestanding -fno-builtin -fno-stack-protector \
-  -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-pie \
-  -nostdlib -static -fuse-ld=lld -Wl,-e,_start -Wl,--build-id=none \
-  -Wl,-z,max-page-size=4096 \
-  "$SCRIPT_DIR/tools/bk-keyboard-monitor.c" \
-  -o "$OUT_DIR/artifacts/bk-keyboard-monitor"
-"$CLANG_DIR/bin/llvm-objdump" -f "$OUT_DIR/artifacts/bk-keyboard-monitor" | \
-  grep -F 'architecture: aarch64' >/dev/null || {
-    echo "invalid keyboard monitor architecture" >&2; exit 1;
-  }
-chmod 0755 "$OUT_DIR/artifacts/bk-keyboard-monitor"
 
 dirty_diff_sha=$(git -C "$KERNEL_DIR" diff --binary HEAD -- | sha256sum | awk '{print $1}')
 ksu_tree_sha=$(
@@ -298,15 +272,14 @@ git -C "$KERNEL_DIR" ls-files --others --exclude-standard > \
   echo "KERNEL_DIRTY_DIFF_SHA256=$dirty_diff_sha"
   echo "ANDROID_STABLE_COMMIT=014241ad77dda0eafbdf671d5b8e86917d8ec97e"
   echo "QUALCOMM_REFERENCE_COMMIT=d1966c80dcfcabe6058eba05ded94a9af967760f"
-  echo "KERNELSU_COMMIT=648e5988cf421172769f80ce07f86331b548c053"
+  echo "KERNELSU_SOURCE=ReSukiSU"
+  echo "KERNELSU_COMMIT=$(cat "$KERNEL_DIR/drivers/kernelsu/UPSTREAM_COMMIT")"
   echo "DROIDSPACES_COMMIT=7412f6fb732fe7f5e3dc6ac0848d82ef9ff98acf"
   echo "KERNELSU_TREE_SHA256=$ksu_tree_sha"
   echo "ANYKERNEL_TEMPLATE_SHA256=$anykernel_template_sha"
   echo "PBRP_SOURCE_ZIP_SHA256=77a06f1bfdcd0d4e47c89d83f95a1b650217c067085808e361510461d9608203"
   echo "PBRP_RAMDISK_SHA256=15ae763c1f5b93ae48bcd007ff1f66871873aaee5b3a32852acbbf75b897fc54"
   echo "PBRP_RAMDISK_GZIP_SHA256=248feef8879116c86df1729ecf9595b4be50834dd5bd66fe5732953cafaa4602"
-  echo "ZRAM_SETUP_SHA256=$(sha256sum "$OUT_DIR/artifacts/bk-zram-setup" | awk '{print $1}')"
-  echo "KEYBOARD_MONITOR_SHA256=$(sha256sum "$OUT_DIR/artifacts/bk-keyboard-monitor" | awk '{print $1}')"
   echo "CLANG=$CLANG_DIR/bin/clang"
   "$CLANG_DIR/bin/clang" --version | head -1
   if [ -n "$CCACHE" ]; then
@@ -322,15 +295,16 @@ git -C "$KERNEL_DIR" ls-files --others --exclude-standard > \
 cp "$OUT_DIR/nabu-a17.config" "$OUT_DIR/artifacts/nabu-a17.config"
 (cd "$OUT_DIR/artifacts" && \
   sha256sum Image.gz dtb dtbo.img dtbo-dump.txt btf-task_struct.txt \
-    build-info.txt nabu-a17.config untracked-sources.txt bk-zram-setup \
-    bk-keyboard-monitor) > \
+    build-info.txt nabu-a17.config untracked-sources.txt) > \
   "$OUT_DIR/artifacts/SHA256SUMS"
-stage "Package" "打包AnyKernel3包"
+stage "打包" "打包AnyKernel3包"
 package_path=$(KERNEL_DIR="$KERNEL_DIR" OUT_DIR="$OUT_DIR" \
   KERNEL_RELEASE="$kernel_release" "$SCRIPT_DIR/pack.sh")
 package_sha=$(sha256sum "$package_path" | awk '{print $1}')
-stage "Done" "构建与打包通过"
-printf '[Artifact] 内核版本 : %s\n' "$kernel_release"
-printf '[Artifact] 产物目录 : %s/artifacts\n' "$OUT_DIR"
-printf '[Artifact] 安装包   : %s\n' "$package_path"
-printf '[Artifact] SHA256   : %s\n' "$package_sha"
+OUT_DIR="$OUT_DIR" CLANG_DIR="$CLANG_DIR" KERNEL_DIR="$KERNEL_DIR" \
+  "$SCRIPT_DIR/build-module.sh"
+stage "完成" "构建与打包通过"
+printf '[产物] 内核版本 : %s\n' "$kernel_release"
+printf '[产物] 产物目录 : %s/artifacts\n' "$OUT_DIR"
+printf '[产物] 安装包   : %s\n' "$package_path"
+printf '[产物] SHA256   : %s\n' "$package_sha"
