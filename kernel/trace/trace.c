@@ -2165,8 +2165,7 @@ tracing_generic_entry_update(struct trace_entry *entry, unsigned long flags,
 		((pc & NMI_MASK    ) ? TRACE_FLAG_NMI     : 0) |
 		((pc & HARDIRQ_MASK) ? TRACE_FLAG_HARDIRQ : 0) |
 		((pc & SOFTIRQ_OFFSET) ? TRACE_FLAG_SOFTIRQ : 0) |
-		(tif_need_resched_now() ? TRACE_FLAG_NEED_RESCHED : 0) |
-		(need_resched_lazy() ? TRACE_FLAG_NEED_RESCHED_LAZY : 0) |
+		(tif_need_resched() ? TRACE_FLAG_NEED_RESCHED : 0) |
 		(test_preempt_need_resched() ? TRACE_FLAG_PREEMPT_RESCHED : 0);
 }
 EXPORT_SYMBOL_GPL(tracing_generic_entry_update);
