@@ -6,6 +6,12 @@ case "$PID" in
 	''|*[!0-9]*) ;;
 	*) kill "$PID" 2>/dev/null || true ;;
 esac
+PID_FILE=/data/adb/bk-kernel/bk-keyboard-ime.pid
+PID=$(cat "$PID_FILE" 2>/dev/null)
+case "$PID" in
+	''|*[!0-9]*) ;;
+	*) kill "$PID" 2>/dev/null || true ;;
+esac
 PID_FILE=/data/adb/bk-kernel/bk-keyboard-monitor.pid
 PID=$(cat "$PID_FILE" 2>/dev/null)
 case "$PID" in

@@ -25,6 +25,7 @@ typedef unsigned long u64;
 #define CONNECTION_NODE \
 	"/sys/devices/platform/soc/soc:xiaomi_keyboard/xiaomi_keyboard_connected"
 #endif
+#define IRQ_GPIO_DEBUG	"/sys/kernel/debug/gpio"
 #define HID_DEVICES	"/sys/bus/hid/devices"
 #define HID_GENERIC	"/sys/bus/hid/drivers/hid-generic/"
 #define HID_BIND	HID_GENERIC "bind"
@@ -225,6 +226,48 @@ static int read_connection(long fd)
 	return count > 0 && value[0] == '1';
 }
 
+/* 1 = keyboard folio line high, 0 = low, -1 = unreadable. */
+static int irq_gpio_level(void)
+{
+	char buf[4096];
+	long count;
+	long i;
+
+	count = read_file(IRQ_GPIO_DEBUG, buf, sizeof(buf) - 1);
+	if (count < 8)
+		return -1;
+	buf[count] = '\0';
+	for (i = 0; i + 7 < count; i++) {
+		if (buf[i] != 'g' || buf[i + 1] != 'p' || buf[i + 2] != 'i' ||
+		    buf[i + 3] != 'o' || buf[i + 4] != '4' || buf[i + 5] != '1' ||
+		    buf[i + 6] != ' ')
+			continue;
+		for (; i + 3 < count; i++) {
+			if (buf[i] == 'i' && buf[i + 1] == 'n' && buf[i + 2] == ' ') {
+				i += 3;
+				while (i < count && buf[i] == ' ')
+					i++;
+				if (i < count && buf[i] == '0')
+					return 0;
+				if (i < count && buf[i] == '1')
+					return 1;
+				return -1;
+			}
+		}
+		return -1;
+	}
+	return -1;
+}
+
+static int keyboard_present(int usb_connected)
+{
+	int level = irq_gpio_level();
+
+	if (level == 0)
+		return 0;
+	return usb_connected;
+}
+
 static void wait_one_second(void)
 {
 	struct kernel_timespec delay = { 1, 0 };
@@ -247,19 +290,19 @@ __attribute__((noreturn)) void _start(void)
 			continue;
 		}
 
-		connected = read_connection(fd);
+		connected = keyboard_present(read_connection(fd));
 		apply_connection(connected);
 		for (;;) {
 			pollfd.fd = fd;
 			pollfd.events = POLLPRI | POLLERR;
 			pollfd.revents = 0;
-			timeout.sec = 5;
+			timeout.sec = 1;
 			timeout.nsec = 0;
 			result = syscall6(SYS_PPOLL, (long)&pollfd, 1,
 					  (long)&timeout, 0, 0, 0);
 			if (result < 0)
 				break;
-			connected = read_connection(fd);
+			connected = keyboard_present(read_connection(fd));
 			apply_connection(connected);
 		}
 		sys_close(fd);
